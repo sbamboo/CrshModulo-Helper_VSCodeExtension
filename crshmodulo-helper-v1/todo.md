@@ -1,0 +1,2 @@
+- Tab-Complete / Auto-Complete
+- Configure stuff from vscode settings or with commands. (preferably config from settings and toggles from commands with defaults in settings).
