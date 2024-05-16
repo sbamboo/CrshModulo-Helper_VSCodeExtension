@@ -13,13 +13,14 @@ let config = {
 	},
 	"blockedDefs": [],
 	"blockedUnmappedDefs": ["crshSession"],
-	"blockedParams": [],
+	"blockedParams": ["self"],
 	"root": null,
 	"sourceFile": null,
 	"parsed": null,
 	"disableFromRoot": false,
 	"msgOnRootDisabled": false,
-	"generatedKeys": ["__source__","__name__","__type__","__def__","__description__","__parameters__"]
+	"generatedKeys": ["__source__","__name__","__type__","__def__","__description__","__parameters__"],
+	"addParamDefaults": false
 };
 
 function extractFromDefSource(source) {
@@ -144,6 +145,55 @@ function parsePythonSource(source) {
   
 	return result;
 }
+
+function cutAndRejoin(str,delim="(") {
+	// Split the string by "("
+	let parts = str.split(delim);
+	
+	// Remove the last part
+	parts.pop();
+	
+	// Rejoin the remaining parts with "("
+	let result = parts.join(delim);
+	
+	return result;
+}
+  
+function removeLastOutermostParenthesesContent(str) {
+	// This regex finds all outermost parentheses and their contents
+	const regex = /\([^()]*\)/g;
+	
+	// Find all matches
+	const matches = [];
+	let match;
+	while ((match = regex.exec(str)) !== null) {
+	  matches.push(match);
+	}
+  
+	// If there are no matches, return the original string
+	if (matches.length === 0) {
+	  return str;
+	}
+  
+	// Get the last match
+	const lastMatch = matches[matches.length - 1];
+  
+	// Remove the last match from the string
+	const result = str.slice(0, lastMatch.index) + str.slice(lastMatch.index + lastMatch[0].length);
+  
+	return result;
+}
+
+function parseLastMethod(str) {
+	str = removeLastOutermostParenthesesContent(str);
+	if (str.includes(')')) {
+		// Split the string by ")" and keep only the last part
+		const parts = str.split(')');
+		return parts[parts.length - 1];
+	} else {
+		return str;
+	}
+  }
 
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
@@ -301,12 +351,12 @@ function activate(context) {
 		});
 
 		// Register completions
-		const paramProvider = vscode.languages.registerCompletionItemProvider(
+		const paramProviderFirst = vscode.languages.registerCompletionItemProvider(
 			activeEditor.document.languageId,
 			{
 				provideCompletionItems(document, position, token) {
 					// Get the current line of text up to the cursor position
-					const linePrefix = document.lineAt(position).text.substr(0, position.character);
+					const linePrefix = parseLastMethod( document.lineAt(position).text.substr(0, position.character) );
 	
 					// Define the list of completion items for csSession
 					let obj;
@@ -320,7 +370,7 @@ function activate(context) {
 						if (linePrefix.endsWith(mappedKey+"(")) {
 							obj = config.parsed[key];
 						} else {
-							for (const childKey of Object.keys(config.parsed[mappedKey])) {
+							for (const childKey of Object.keys(config.parsed[key])) {
 								let mappedChildKey = childKey;
 								for (const [key3,value2] of Object.entries(config.mapping)) {
 									if (value2 === childKey) {
@@ -336,10 +386,14 @@ function activate(context) {
 					}
 					if (obj && obj !== null && obj !== undefined) {
 						let completions = [];
+						let defaultedCompletions = [];
 						obj.__parameters__.forEach(param => {
-							completions.push( new vscode.CompletionItem(param.name, vscode.CompletionItemKind.Method) );
+							completions.push( new vscode.CompletionItem(`${param.name}=`, vscode.CompletionItemKind.Variable) );
+							if (param.defaultValue !== null && config.addParamDefaults === true) {
+								defaultedCompletions.push( new vscode.CompletionItem(`${param.name}=${param.defaultValue}`, vscode.CompletionItemKind.Value) );
+							}
 						});
-						return completions;
+						return completions.concat(defaultedCompletions);
 					} else {
 						return undefined;
 					}
@@ -348,12 +402,64 @@ function activate(context) {
 			'('
 		);
 
+		const paramProviderSecondary = vscode.languages.registerCompletionItemProvider(
+			activeEditor.document.languageId,
+			{
+				provideCompletionItems(document, position, token) {
+					// Get the current line of text up to the cursor position
+					const linePrefix = parseLastMethod( document.lineAt(position).text.substr(0, position.character) );
+					const linePrefixCut = linePrefix.includes("(") ? cutAndRejoin(linePrefix)+"(" : linePrefix;
+	
+					// Define the list of completion items for csSession
+					let obj;
+					for (const key of Object.keys(config.parsed)) {
+						let mappedKey = key;
+						for (const [key2,value] of Object.entries(config.mapping)) {
+							if (value === key) {
+								mappedKey = key2;
+							}
+						}
+						if (linePrefixCut.endsWith(mappedKey+"(")) {
+							obj = config.parsed[key];
+						} else {
+							for (const childKey of Object.keys(config.parsed[key])) {
+								let mappedChildKey = childKey;
+								for (const [key3,value2] of Object.entries(config.mapping)) {
+									if (value2 === childKey) {
+										mappedChildKey = key3;
+									}
+								}
+								// MARK: `mappedKey` / `mappedChildKey` unsynced
+								if (linePrefixCut.endsWith(mappedKey+"."+mappedChildKey+"(")) {
+									obj = config.parsed[key][childKey];
+								}
+							}
+						}
+					}
+					if (obj && obj !== null && obj !== undefined) {
+						let completions = [];
+						let defaultedCompletions = [];
+						obj.__parameters__.forEach(param => {
+							completions.push( new vscode.CompletionItem(`${param.name}=`, vscode.CompletionItemKind.Variable) );
+							if (param.defaultValue !== null && config.addParamDefaults === true) {
+								defaultedCompletions.push( new vscode.CompletionItem(`${param.name}=${param.defaultValue}`, vscode.CompletionItemKind.Value) );
+							}
+						});
+						return completions.concat(defaultedCompletions);
+					} else {
+						return undefined;
+					}
+				}
+			},
+			','
+		);
+
 		const submethodProvider = vscode.languages.registerCompletionItemProvider(
 			activeEditor.document.languageId,
 			{
 				provideCompletionItems(document, position, token) {
 					// Get the current line of text up to the cursor position
-					const linePrefix = document.lineAt(position).text.substr(0, position.character);
+					const linePrefix = parseLastMethod( document.lineAt(position).text.substr(0, position.character) );
 	
 					// Define the list of completion items for csSession
 					let obj;
@@ -396,7 +502,8 @@ function activate(context) {
 			'.'
 		);
 		
-		context.subscriptions.push(paramProvider);
+		context.subscriptions.push(paramProviderFirst);
+		context.subscriptions.push(paramProviderSecondary);
 		context.subscriptions.push(submethodProvider);
 	}
 }
