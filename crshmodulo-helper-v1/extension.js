@@ -369,7 +369,7 @@ function activate(context) {
 							}
 						}
 					}
-					if (obj && obj !== null && obj !== undefined) {
+					if (obj && obj != null && obj != undefined) {
 						let completions = [];
 						let defaultedCompletions = [];
 						obj.__parameters__.forEach(param => {
@@ -431,7 +431,7 @@ function activate(context) {
 							}
 						}
 					}
-					if (obj && obj !== null && obj !== undefined) {
+					if (obj && obj != null && obj != undefined) {
 						let completions = [];
 						for (const prop of Object.keys(obj)) {
 							if (!config.generatedKeys.includes(prop)) {
