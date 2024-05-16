@@ -296,24 +296,6 @@ function activate(context) {
 					// Display
 					const markdown = new vscode.MarkdownString(``, true);
 
-					/*if (obj) {
-						markdown.appendMarkdown(`**${obj.__name__}** (*${obj.__type__}*)\n\n`);
-						if (obj.__parameters__.length > 0) {
-							markdown.appendMarkdown(`### Parameters:`);
-							obj.__parameters__.forEach(param => {
-								let paramStr = `  ${param.name}`;
-								if (param.typeHint !== null) {
-									paramStr += `: ${param.typeHint}`;
-								}
-								if (param.defaultValue !== null) {
-									paramStr += ` = ${param.defaultValue}`;
-								}
-								markdown.appendCodeblock(paramStr, 'python');
-							});
-						}
-						markdown.appendMarkdown(`<span style="color:#94A;"><br>🛠️Text inserted by CrshModulo-Helper</span>`);
-					}*/
-
 					if (obj) {
 						let paramStr = ``;
 						let descString = ``;
@@ -350,13 +332,17 @@ function activate(context) {
 		
 		});
 
-		// Register completions
-		const paramProviderFirst = vscode.languages.registerCompletionItemProvider(
-			activeEditor.document.languageId,
-			{
+		function paramCompleter_fabricator(cutLinePrefix=false) {
+			return {
 				provideCompletionItems(document, position, token) {
 					// Get the current line of text up to the cursor position
+					let usedPrefix;
 					const linePrefix = parseLastMethod( document.lineAt(position).text.substr(0, position.character) );
+					if (cutLinePrefix == true) {
+						usedPrefix = linePrefix.includes("(") ? cutAndRejoin(linePrefix)+"(" : linePrefix;
+					} else {
+						usedPrefix = linePrefix;
+					}
 	
 					// Define the list of completion items for csSession
 					let obj;
@@ -367,7 +353,7 @@ function activate(context) {
 								mappedKey = key2;
 							}
 						}
-						if (linePrefix.endsWith(mappedKey+"(")) {
+						if (usedPrefix.endsWith(mappedKey+"(")) {
 							obj = config.parsed[key];
 						} else {
 							for (const childKey of Object.keys(config.parsed[key])) {
@@ -377,8 +363,7 @@ function activate(context) {
 										mappedChildKey = key3;
 									}
 								}
-								// MARK: `mappedKey` / `mappedChildKey` unsynced
-								if (linePrefix.endsWith(mappedKey+"."+mappedChildKey+"(")) {
+								if (usedPrefix.endsWith(mappedKey+"."+mappedChildKey+"(")) {
 									obj = config.parsed[key][childKey];
 								}
 							}
@@ -398,59 +383,19 @@ function activate(context) {
 						return undefined;
 					}
 				}
-			},
+			}
+		}
+
+		// Register completions
+		const paramProviderFirst = vscode.languages.registerCompletionItemProvider(
+			activeEditor.document.languageId,
+			paramCompleter_fabricator(false),
 			'('
 		);
 
 		const paramProviderSecondary = vscode.languages.registerCompletionItemProvider(
 			activeEditor.document.languageId,
-			{
-				provideCompletionItems(document, position, token) {
-					// Get the current line of text up to the cursor position
-					const linePrefix = parseLastMethod( document.lineAt(position).text.substr(0, position.character) );
-					const linePrefixCut = linePrefix.includes("(") ? cutAndRejoin(linePrefix)+"(" : linePrefix;
-	
-					// Define the list of completion items for csSession
-					let obj;
-					for (const key of Object.keys(config.parsed)) {
-						let mappedKey = key;
-						for (const [key2,value] of Object.entries(config.mapping)) {
-							if (value === key) {
-								mappedKey = key2;
-							}
-						}
-						if (linePrefixCut.endsWith(mappedKey+"(")) {
-							obj = config.parsed[key];
-						} else {
-							for (const childKey of Object.keys(config.parsed[key])) {
-								let mappedChildKey = childKey;
-								for (const [key3,value2] of Object.entries(config.mapping)) {
-									if (value2 === childKey) {
-										mappedChildKey = key3;
-									}
-								}
-								// MARK: `mappedKey` / `mappedChildKey` unsynced
-								if (linePrefixCut.endsWith(mappedKey+"."+mappedChildKey+"(")) {
-									obj = config.parsed[key][childKey];
-								}
-							}
-						}
-					}
-					if (obj && obj !== null && obj !== undefined) {
-						let completions = [];
-						let defaultedCompletions = [];
-						obj.__parameters__.forEach(param => {
-							completions.push( new vscode.CompletionItem(`${param.name}=`, vscode.CompletionItemKind.Variable) );
-							if (param.defaultValue !== null && config.addParamDefaults === true) {
-								defaultedCompletions.push( new vscode.CompletionItem(`${param.name}=${param.defaultValue}`, vscode.CompletionItemKind.Value) );
-							}
-						});
-						return completions.concat(defaultedCompletions);
-					} else {
-						return undefined;
-					}
-				}
-			},
+			paramCompleter_fabricator(true),
 			','
 		);
 
