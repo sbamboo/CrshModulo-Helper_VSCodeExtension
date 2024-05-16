@@ -18,7 +18,8 @@ let config = {
 	"sourceFile": null,
 	"parsed": null,
 	"disableFromRoot": false,
-	"msgOnRootDisabled": false
+	"msgOnRootDisabled": false,
+	"generatedKeys": ["__source__","__name__","__type__","__def__","__description__","__parameters__"]
 };
 
 function extractFromDefSource(source) {
@@ -45,27 +46,40 @@ function extractFromDefSource(source) {
         __name__: name,
         __type__: type === "def" ? "func" : type,
 		__def__: type,
-        __description__: description ? description : ""
+        __description__: description ? description : "",
+		__parameters__: []
     };
   
-    result.__parameters__ = params.filter(param => param.trim() !== '' && !config.blockedParams.includes(param)).map(param => {
-        let [paramName, defaultValue] = param.split('=').map(part => part.trim());
-		let typeHint = null;
-	
-		// Extracting type hint if present
-		const typeHintMatch = paramName.match(/^(.*?):\s*(.*)$/);
-		if (typeHintMatch) {
-			paramName = typeHintMatch[1].trim();
-			typeHint = typeHintMatch[2].trim();
-		}
+	let i = 0;
+    for (let param of params) {
+		if (param.trim() !== '' && !config.blockedParams.includes(param)) {
 
-		// Return parameter object
-		return {
-			name: paramName,
-			typeHint: typeHint || null,
-			defaultValue: defaultValue || null
-		};
-    });
+			let [paramName, defaultValue] = param.split('=').map(part => part.trim());
+			let typeHint = null;
+
+			if (paramName.startsWith('"') || paramName.startsWith("'")) {
+				result.__parameters__[i-1].defaultValue += ", "+paramName;
+			} else {
+				// Extracting type hint if present
+				const typeHintMatch = paramName.match(/^(.*?):\s*(.*)$/);
+				if (typeHintMatch) {
+					paramName = typeHintMatch[1].trim();
+					typeHint = typeHintMatch[2].trim();
+				}
+			
+				// Create parameter object
+				let parameterObject = {
+					name: paramName,
+					typeHint: typeHint || null,
+					defaultValue: defaultValue || null
+				};
+			
+				// Add parameter object to result.__parameters__
+				result.__parameters__.push(parameterObject);
+				i++;
+			}
+		}
+	}
   
     return result;
 }
@@ -199,6 +213,7 @@ function activate(context) {
 			}
 		}
 
+		// Register hover
 		vscode.languages.registerHoverProvider("python", {
 
 			provideHover(document, position, token) {
@@ -251,6 +266,7 @@ function activate(context) {
 
 					if (obj) {
 						let paramStr = ``;
+						let descString = ``;
 						obj.__parameters__.forEach(param => {
 							paramStr += `${param.name}`;
 							if (param.typeHint !== null) {
@@ -262,8 +278,11 @@ function activate(context) {
 							paramStr += ", ";
 						});
 						paramStr = paramStr.replace(/, $/, "");
+						if (obj.__description__ != "") {
+							descString = `*${obj.__description__}*`;
+						}
 						markdown.appendCodeblock( `${obj.__def__} ${obj.__name__}(${paramStr})` ,activeEditor.document.languageId);
-						markdown.appendMarkdown(`*${obj.__description__}*\n\n<span style="color:#94A;"><br>🛠️Text inserted by CrshModulo-Helper</span>`);
+						markdown.appendMarkdown(`${descString}\n\n<span style="color:#94A;"><br>🛠️Text inserted by CrshModulo-Helper</span>`);
 					}
 
 					markdown.isTrusted = true;
@@ -280,6 +299,105 @@ function activate(context) {
 			}
 		
 		});
+
+		// Register completions
+		const paramProvider = vscode.languages.registerCompletionItemProvider(
+			activeEditor.document.languageId,
+			{
+				provideCompletionItems(document, position, token) {
+					// Get the current line of text up to the cursor position
+					const linePrefix = document.lineAt(position).text.substr(0, position.character);
+	
+					// Define the list of completion items for csSession
+					let obj;
+					for (const key of Object.keys(config.parsed)) {
+						let mappedKey = key;
+						for (const [key2,value] of Object.entries(config.mapping)) {
+							if (value === key) {
+								mappedKey = key2;
+							}
+						}
+						if (linePrefix.endsWith(mappedKey+"(")) {
+							obj = config.parsed[key];
+						} else {
+							for (const childKey of Object.keys(config.parsed[mappedKey])) {
+								let mappedChildKey = childKey;
+								for (const [key3,value2] of Object.entries(config.mapping)) {
+									if (value2 === childKey) {
+										mappedChildKey = key3;
+									}
+								}
+								// MARK: `mappedKey` / `mappedChildKey` unsynced
+								if (linePrefix.endsWith(mappedKey+"."+mappedChildKey+"(")) {
+									obj = config.parsed[key][childKey];
+								}
+							}
+						}
+					}
+					if (obj && obj !== null && obj !== undefined) {
+						let completions = [];
+						obj.__parameters__.forEach(param => {
+							completions.push( new vscode.CompletionItem(param.name, vscode.CompletionItemKind.Method) );
+						});
+						return completions;
+					} else {
+						return undefined;
+					}
+				}
+			},
+			'('
+		);
+
+		const submethodProvider = vscode.languages.registerCompletionItemProvider(
+			activeEditor.document.languageId,
+			{
+				provideCompletionItems(document, position, token) {
+					// Get the current line of text up to the cursor position
+					const linePrefix = document.lineAt(position).text.substr(0, position.character);
+	
+					// Define the list of completion items for csSession
+					let obj;
+					for (const key of Object.keys(config.parsed)) {
+						let mappedKey = key;
+						for (const [key2,value] of Object.entries(config.mapping)) {
+							if (value === key) {
+								mappedKey = key2;
+							}
+						}
+						if (linePrefix.endsWith(mappedKey+".")) {
+							obj = config.parsed[key];
+						} else {
+							for (const childKey of Object.keys(config.parsed[mappedKey])) {
+								let mappedChildKey = childKey;
+								for (const [key3,value2] of Object.entries(config.mapping)) {
+									if (value2 === childKey) {
+										mappedChildKey = key3;
+									}
+								}
+								if (linePrefix.endsWith(mappedKey+"."+mappedChildKey+".")) {
+									obj = config.parsed[key][childKey];
+								}
+							}
+						}
+					}
+					if (obj && obj !== null && obj !== undefined) {
+						let completions = [];
+						for (const prop of Object.keys(obj)) {
+							if (!config.generatedKeys.includes(prop)) {
+								completions.push( new vscode.CompletionItem(prop, vscode.CompletionItemKind.Method) );
+							}
+						}
+						return completions;
+					} else {
+						return undefined;
+					}
+				}
+			},
+			'.'
+		);
+		
+		context.subscriptions.push(paramProvider);
+		context.subscriptions.push(submethodProvider);
 	}
 }
 
